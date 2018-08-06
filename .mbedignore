@@ -1,0 +1,8 @@
+qpcpp/3rd_party/*
+qpcpp/doxygen/*
+qpcpp/examples/*
+qpcpp/ports/*
+qpcpp/src/qs/*
+qpcpp/src/qv/*
+qpcpp/src/qk/*
+qpcpp/src/qxk/*
