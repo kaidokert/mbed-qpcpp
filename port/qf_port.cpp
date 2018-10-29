@@ -19,29 +19,26 @@ Q_DEFINE_THIS_MODULE("qf_port")
 Mutex QF_pThreadMutex_;
 
 // Local objects *************************************************************
-static bool l_isRunning;  // flag indicating when QF is running
-static Mutex l_startupMutex;
-
-#if 0    
-static struct timespec l_tick;
-static int_t l_tickPrio;
-enum { NANOSLEEP_NSEC_PER_SEC = 1000000000 }; // see NOTE05
-#endif
-
+static bool isRunning = false;  // flag indicating when QF is running
+static Mutex startup_mutex;
+static int tick_period_ms = 1000;    
+static osPriority tick_priority = osPriorityNormal;
+static events::EventQueue event_queue(2 * EVENTS_EVENT_SIZE);
+    
 //****************************************************************************
 void QF::init(void) {
-    // lock memory so we're never swapped out to disk
+    // Lock memory so we're never swapped out to disk
     // mlockall(MCL_CURRENT | MCL_FUTURE); // uncomment when supported
 
-    // init the global mutex with the default non-recursive initializer
+    // Init the global mutex with the default non-recursive initializer
     // QF_pThreadMutex_
 
-    // init the startup mutex with the default non-recursive initializer
-    // l_startupMutex
+    // Init the startup mutex with the default non-recursive initializer
+    // startup_mutex
 
-    // lock the startup mutex to block any active objects started before
+    // Lock the startup mutex to block any active objects started before
     // calling QF::run()
-    l_startupMutex.lock();
+    startup_mutex.lock();
 
     // clear the internal QF variables, so that the framework can (re)start
     // correctly even if the startup code is not called to clear the
@@ -51,15 +48,12 @@ void QF::init(void) {
     bzero(&QF::timeEvtHead_[0], static_cast<uint_fast16_t>(sizeof(QF::timeEvtHead_)));
     bzero(&active_[0], static_cast<uint_fast16_t>(sizeof(active_)));
 
-#if 0    
-    l_tick.tv_sec = 0;
-    l_tick.tv_nsec = NANOSLEEP_NSEC_PER_SEC/100L; // default clock tick
-    l_tickPrio = sched_get_priority_min(SCHED_FIFO); // default tick prio
-#endif
+    tick_priority = osPriorityNormal;
 }
 
 //****************************************************************************
 int_t QF::run(void) {
+    
     onStartup();  // invoke startup callback
 
 #if 0    
@@ -73,39 +67,52 @@ int_t QF::run(void) {
         // setting priority failed, probably due to insufficient privieges
     }
 #endif
-
+    
     // unlock the startup mutex to unblock any active objects started before
     // calling QF::run()
-    l_startupMutex.unlock();
+    startup_mutex.unlock();
 
-    l_isRunning = true;
-    while (l_isRunning) {  // the clock tick loop...
+    isRunning = true;    
+#if 0    
+    while (isRunning) {  // the clock tick loop...
         QF_onClockTick();  // clock tick callback (must call QF_TICK_X())
 
-        wait(0.01);
-
-        // nanosleep(&l_tick, NULL); // sleep for the number of ticks, NOTE05
+        wait((float) tick_period_ms/1000.0);
     }
+#endif
+    
+#if 1    
+    event_queue.call_every(tick_period_ms, QF_onClockTick);    
+    // Process the event queue.
+    event_queue.dispatch_forever();
+#endif
+    
     onCleanup();  // invoke cleanup callback
-    // pthread_mutex_destroy(&l_startupMutex);
-    // pthread_mutex_destroy(&QF_pThreadMutex_);
+    
+    // Destroy startup_mutex
+    // Destroy QF_pThreadMutex_
+    
     return static_cast<int_t>(0);  // return success
 }
 //****************************************************************************
 void QF_setTickRate(uint32_t ticksPerSec, int_t tickPrio) {
     Q_REQUIRE_ID(300, ticksPerSec != static_cast<uint32_t>(0));
-    // l_tick.tv_nsec = NANOSLEEP_NSEC_PER_SEC / ticksPerSec;
-    // l_tickPrio = tickPrio;
+    tick_period_ms = 1000/ticksPerSec;
+    tick_priority = static_cast<osPriority>(tickPrio);
 }
 //****************************************************************************
 void QF::stop(void) {
-    l_isRunning = false;  // stop the loop in QF::run()
+    if (!isRunning) {
+        return;
+    }    
+    isRunning = false;  // stop the loop in QF::run()
+    event_queue.break_dispatch();
 }
 //............................................................................
 void QF::thread_(QActive* act) {
     // block this thread until the startup mutex is unlocked from QF::run()
-    l_startupMutex.lock();
-    l_startupMutex.unlock();
+    startup_mutex.lock();
+    startup_mutex.unlock();
 
     // loop until m_thread is cleared in QActive::stop()
     do {
@@ -139,45 +146,9 @@ void QActive::start(uint_fast8_t prio,
     m_prio = static_cast<uint8_t>(prio);  // set the QF priority of this AO
     QF::add_(this);                       // make QF aware of this AO
     this->init(ie);                       // execute initial transition (virtual call)
-
-#if 0    
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-
-    // SCHED_FIFO corresponds to real-time preemptive priority-based scheduler
-    // NOTE: This scheduling policy requires the superuser privileges
-    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
-
-    // see NOTE04
-    struct sched_param param;
-    param.sched_priority = prio
-                           + (sched_get_priority_max(SCHED_FIFO)
-                              - QF_MAX_ACTIVE - 3);
-
-    pthread_attr_setschedparam(&attr, &param);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-
-    // stack size not provided?
-    if (stkSize == 0U) {
-        stkSize = (uint_fast16_t)PTHREAD_STACK_MIN; // the minimum
-    }
-    pthread_t thread;
-    if (pthread_create(&thread, &attr, &ao_thread, this) != 0) {
-
-        // Creating the p-thread with the SCHED_FIFO policy failed.
-        // Most probably this application has no superuser privileges,
-        // so we just fall back to the default SCHED_OTHER policy
-        // and priority 0.
-
-        pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
-        param.sched_priority = 0;
-        pthread_attr_setschedparam(&attr, &param);
-        Q_ALLEGE(pthread_create(&thread, &attr, &ao_thread, this)== 0);
-    }
-    pthread_attr_destroy(&attr);
-#endif
-
+       
     Thread* thread = new Thread();
+    //!TODO thread->set_priority(static_cast<osPriority>(prio));
     thread->start(mbed::callback(&ao_thread, this));
     m_thread = static_cast<uint8_t>(1);
 }

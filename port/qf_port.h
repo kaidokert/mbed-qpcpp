@@ -6,7 +6,7 @@
 
 #include "mbed.h"
 
-#define QF_OS_OBJECT_TYPE Queue<void*, 16>
+#define QF_OS_OBJECT_TYPE Queue<void*, 8>
 
 #define QF_MAX_ACTIVE 32
 
