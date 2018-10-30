@@ -56,8 +56,6 @@ void QF_setTickRate(uint32_t ticksPerSec, int_t tickPrio);
 // clock tick callback (provided in the app)
 void QF_onClockTick(void);
 
-// extern Mutex QF_pThreadMutex_; // mutex for QF critical section
-
 }  // namespace QP
 
 #ifdef QP_IMPL

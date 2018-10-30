@@ -11,6 +11,12 @@
 
 #include "mbed.h"
 
+#if QF_PORT_DEBUG
+#define QF_PORT_DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+#define QF_PORT_DEBUG_PRINTF(...)
+#endif
+
 namespace QP {
 
 Q_DEFINE_THIS_MODULE("qf_port")
@@ -49,25 +55,18 @@ int_t QF::run(void) {
     
     onStartup();  // invoke startup callback
 
-#if 0    
-    // try to set the priority of the ticker thread
-    struct sched_param sparam;
-    sparam.sched_priority = l_tickPrio;
-    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sparam) == 0) {
-        // success, this application has sufficient privileges
-    }
-    else {
-        // setting priority failed, probably due to insufficient privieges
-    }
-#endif
+    QF_PORT_DEBUG_PRINTF("QF::run after onStartup();\r\n");
     
-    printf("QF::run after onStartup();\r\n");
-    
-    // unlock the startup mutex to unblock any active objects started before
+    // Set tick thread priority
+    osThreadSetPriority(Thread::gettid(), tick_priority);
+    //!FIXME for Mbed-OS v5.10
+    //osThreadSetPriority(ThisThread::get_id(), tick_priority);
+        
+    // Unlock the startup mutex to unblock any active objects started before
     // calling QF::run()
     startup_mutex.unlock();
 
-    printf("QF::run after startup_mutex.unlock();\r\n");
+    QF_PORT_DEBUG_PRINTF("QF::run after startup_mutex.unlock();\r\n");
         
     is_running = true;    
 #if 0    
@@ -84,8 +83,6 @@ int_t QF::run(void) {
 #endif
     
     onCleanup();  // invoke cleanup callback
-    
-    // Destroy startup_mutex
     
     return static_cast<int_t>(0);  // return success
 }
@@ -117,7 +114,6 @@ void QF::thread_(QActive* act) {
     } while (act->m_thread != static_cast<uint8_t>(0));
 
     QF::remove_(act);  // remove this object from the framework
-    // pthread_cond_destroy(&act->m_osObject); // cleanup the condition variable
 }
 //............................................................................
 // thread routine for all AOs
@@ -132,18 +128,19 @@ void QActive::start(uint_fast8_t prio,
                     void* stkSto,
                     uint_fast16_t stkSize,
                     QEvt const* ie) {
-    // p-threads allocate stack internally
+#if 0    
+    // Threads have to allocate stack internally
     Q_REQUIRE_ID(600, stkSto == static_cast<void*>(0));
-
-    // pthread_cond_init(&m_osObject, 0);
-
+#endif
+    
     m_eQueue.init(qSto, qLen);
     m_prio = static_cast<uint8_t>(prio);  // set the QF priority of this AO
     QF::add_(this);                       // make QF aware of this AO
     this->init(ie);                       // execute initial transition (virtual call)
        
-    Thread* thread = new Thread();
-    //!TODO thread->set_priority(static_cast<osPriority>(prio));
+    QF_PORT_DEBUG_PRINTF("QActive::start prio = %d, stkSize = %u\r\n", (int) prio, (unsigned) stkSize);
+    
+    Thread* thread = new Thread(static_cast<osPriority>(prio), (stkSize != 0) ? static_cast<uint32_t>(stkSize) : OS_STACK_SIZE, static_cast<unsigned char *>(stkSto));
     thread->start(mbed::callback(&ao_thread, this));
     m_thread = static_cast<uint8_t>(1);
 }
