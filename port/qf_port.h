@@ -1,15 +1,16 @@
 #ifndef __mbed_qf_port_h
 #define __mbed_qf_port_h
 
+#include "mbed.h"
+
 #define QF_EQUEUE_TYPE QEQueue
 #define QF_THREAD_TYPE int
-
-#include "mbed.h"
 
 #define QF_OS_OBJECT_TYPE Queue<void*, 8>
 
 #define QF_MAX_ACTIVE 32
 
+#if 0
 #define QF_INT_DISABLE() \
     {}
 #define QF_INT_ENABLE() \
@@ -19,6 +20,25 @@
     {}
 #define QF_CRIT_EXIT(stat_) \
     {}
+#endif
+
+#define QF_INT_DISABLE() \
+    { CriticalSectionLock::enable(); }
+#define QF_INT_ENABLE() \
+    { CriticalSectionLock::disable(); }
+
+#if 0
+// QF critical section
+// #define QF_CRIT_STAT_TYPE not defined
+#define QF_CRIT_ENTRY(stat_) { printf("QF_CRIT_ENTRY %s:%d\r\n", __FILE__, __LINE__); CriticalSectionLock::enable(); /* CriticalSectionLock::disable(); */ }
+#define QF_CRIT_EXIT(stat_)  { CriticalSectionLock::disable(); printf("QF_CRIT_EXIT %s:%d\r\n", __FILE__, __LINE__); } 
+#endif
+
+// QF critical section
+#define QF_CRIT_STAT_TYPE Mutex
+#define QF_CRIT_ENTRY(mutex_) mutex_.lock()
+#define QF_CRIT_EXIT(mutex_)  mutex_.unlock()
+
 
 // Activate the QF ISR API
 //#define QF_ISR_API    1
