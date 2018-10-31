@@ -6,7 +6,7 @@
 #define QF_EQUEUE_TYPE QEQueue
 #define QF_THREAD_TYPE int
 
-#define QF_OS_OBJECT_TYPE Queue<void*, 8>
+#define QF_OS_OBJECT_TYPE EventFlags
 
 #define QF_MAX_ACTIVE 32
 
@@ -34,11 +34,22 @@
 #define QF_CRIT_EXIT(stat_)  { CriticalSectionLock::disable(); printf("QF_CRIT_EXIT %s:%d\r\n", __FILE__, __LINE__); } 
 #endif
 
+#if 0
 // QF critical section
 #define QF_CRIT_STAT_TYPE Mutex
 #define QF_CRIT_ENTRY(mutex_) mutex_.lock()
 #define QF_CRIT_EXIT(mutex_)  mutex_.unlock()
+#endif
 
+class OneSlotSemaphore : public Semaphore {
+   public:   
+    OneSlotSemaphore() : Semaphore(1) {}
+};
+
+// QF critical section
+#define QF_CRIT_STAT_TYPE OneSlotSemaphore
+#define QF_CRIT_ENTRY(semaphore) semaphore.wait()
+#define QF_CRIT_EXIT(semaphore)  semaphore.release()
 
 // Activate the QF ISR API
 //#define QF_ISR_API    1
@@ -61,12 +72,12 @@ void QF_onClockTick(void);
 #ifdef QP_IMPL
 #define QACTIVE_EQUEUE_WAIT_(me_)                                 \
     while ((me_)->m_eQueue.m_frontEvt == static_cast<QEvt*>(0)) { \
-        osEvent evt = (me_)->m_osObject.get();                    \
+        (me_)->m_osObject.wait_all(0x1);                          \
     }
 
 #define QACTIVE_EQUEUE_SIGNAL_(me_)  \
     do {                             \
-        (me_)->m_osObject.put(NULL); \
+        (me_)->m_osObject.set(0x1);  \
     } while (0)
 
 // Mbed-specific scheduler locking (not used at this point)
